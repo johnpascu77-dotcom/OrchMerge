@@ -7,8 +7,9 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     titleLabel.setFont (juce::Font (juce::FontOptions (20.0f, juce::Font::bold)));
     addAndMakeVisible (titleLabel);
 
-    subtitleLabel.setText ("Phase 2 - Hub naive merge", juce::dontSendNotification);
-    subtitleLabel.setFont (juce::Font (juce::FontOptions (13.0f)));
+    subtitleLabel.setText ("Phase 2 - Hub naive merge  |  compiled " __DATE__ " " __TIME__,
+                            juce::dontSendNotification);
+    subtitleLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
     subtitleLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
     addAndMakeVisible (subtitleLabel);
 
@@ -26,7 +27,7 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     updateStatus();
     startTimerHz (4);
 
-    setSize (360, 200);
+    setSize (440, 200);
 }
 
 OrchMergeAudioProcessorEditor::~OrchMergeAudioProcessorEditor()
