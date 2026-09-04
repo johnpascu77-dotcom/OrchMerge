@@ -7,7 +7,7 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     titleLabel.setFont (juce::Font (juce::FontOptions (20.0f, juce::Font::bold)));
     addAndMakeVisible (titleLabel);
 
-    subtitleLabel.setText ("Phase 1 - Sender skeleton", juce::dontSendNotification);
+    subtitleLabel.setText ("Phase 2 - Hub naive merge", juce::dontSendNotification);
     subtitleLabel.setFont (juce::Font (juce::FontOptions (13.0f)));
     subtitleLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
     addAndMakeVisible (subtitleLabel);
@@ -41,19 +41,38 @@ void OrchMergeAudioProcessorEditor::timerCallback()
 
 void OrchMergeAudioProcessorEditor::updateStatus()
 {
-    const auto mode = audioProcessor.getLink().getMode();
+    const auto& link = audioProcessor.getLink();
 
     juce::String text;
-    if (mode == OrchMergeLink::Mode::HubNotBuilt)
+    switch (link.getMode())
     {
-        text = "Hub role selected - not yet implemented (Phase 2).\n"
-               "This track's MIDI still passes through unchanged.";
-    }
-    else
-    {
-        text = audioProcessor.getLink().isSenderConnected()
-                   ? "Connected to Hub."
-                   : "Waiting for Hub (port " + juce::String (OrchMergeLink::kPort) + ")...";
+        case OrchMergeLink::Mode::Sender:
+            text = link.isSenderConnected()
+                       ? "Connected to Hub."
+                       : "Waiting for Hub (port " + juce::String (OrchMergeLink::kPort) + ")...";
+            break;
+
+        case OrchMergeLink::Mode::Hub:
+        {
+            const int count = link.getConnectedSenderCountForUi();
+            text = juce::String (count) + (count == 1 ? " sender connected." : " senders connected.");
+
+            if (const auto lastMs = link.getLastRelayedNoteMsForUi(); lastMs > 0)
+            {
+                const double secondsAgo = (juce::Time::currentTimeMillis() - lastMs) / 1000.0;
+                text << "\nLast note relayed " << juce::String (secondsAgo, 1) << "s ago.";
+            }
+            else
+            {
+                text << "\nNo notes relayed yet.";
+            }
+            break;
+        }
+
+        case OrchMergeLink::Mode::HubPortBusy:
+            text = "Port " + juce::String (OrchMergeLink::kPort) + " is already in use - "
+                   "another Hub instance may already be bound to it.";
+            break;
     }
 
     statusLabel.setText (text, juce::dontSendNotification);

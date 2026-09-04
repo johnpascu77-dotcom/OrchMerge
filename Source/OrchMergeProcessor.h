@@ -5,17 +5,15 @@
 
 class OrchMergeLink;
 
-// OrchMerge - Phase 1: plugin skeleton, Sender pass-through only.
+// OrchMerge - Phase 2: Hub naive merge.
 //
-// A transparent MIDI-effect plugin, dropped on every source track (Sender
-// role, default) plus one Hub track (Hub role - not yet implemented, see
-// Docs/OrchMerge_Design.md). Whatever role is selected, this plugin never
-// alters the MIDI passing through its own track - that invariant holds from
-// Phase 1 onward, same as OrchCapture's own "observe/relay only" promise.
-//
-// Phase 1 exists to prove: it loads, the role param + discovery skeleton work,
-// and dropping it onto a track before the Hub exists is completely safe.
-// Note merging itself (the Hub side) is Phase 2+.
+// Dropped on every source track (Sender role, default) plus one Hub track
+// (Hub role). A Sender never alters the MIDI passing through its own track -
+// it only *observes* note on/off events (tagged with its own ppq) to forward
+// to the Hub via OrchMergeLink. The Hub track's own incoming MIDI is not
+// relevant - its processBlock instead emits whatever the Link has merged from
+// every connected Sender, immediately on receipt (no ppq-aware placement yet;
+// that's Phase 3, see Docs/OrchMerge_Design.md SS3).
 class OrchMergeAudioProcessor final : public juce::AudioProcessor
 {
 public:
@@ -59,6 +57,8 @@ public:
 private:
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* roleParam = nullptr;
+
+    double sampleRate = 44100.0;
 
     std::unique_ptr<OrchMergeLink> link;
 

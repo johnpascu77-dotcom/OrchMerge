@@ -31,7 +31,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout OrchMergeAudioProcessor::cre
     return { params.begin(), params.end() };
 }
 
-void OrchMergeAudioProcessor::prepareToPlay (double, int) {}
+void OrchMergeAudioProcessor::prepareToPlay (double newSampleRate, int)
+{
+    sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
+}
+
 void OrchMergeAudioProcessor::releaseResources() {}
 
 bool OrchMergeAudioProcessor::isBusesLayoutSupported (const BusesLayout&) const
@@ -39,10 +43,65 @@ bool OrchMergeAudioProcessor::isBusesLayoutSupported (const BusesLayout&) const
     return true;
 }
 
-void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&)
+void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
-    // Transparent pass-through: the incoming MidiBuffer is left exactly as the
-    // host handed it to us, in every role. Note observation/merging is Phase 2+.
+    buffer.clear();
+
+    if (isHubRoleParamOn())
+    {
+        // Hub: this track carries no source material of its own - whatever
+        // arrived on it is discarded, and it emits only what the Link has
+        // decided (from every connected Sender) is ready to relay right now.
+        midiMessages.clear();
+
+        for (const auto& ev : link->drainEmitEvents())
+        {
+            const auto message = ev.isNoteOn
+                ? juce::MidiMessage::noteOn (ev.channel, ev.note, static_cast<juce::uint8> (ev.velocity))
+                : juce::MidiMessage::noteOff (ev.channel, ev.note, static_cast<juce::uint8> (ev.velocity));
+            midiMessages.addEvent (message, 0);
+        }
+
+        return;
+    }
+
+    // Sender: transparent pass-through - midiMessages is left exactly as the
+    // host handed it to us. We only *observe* note on/off to forward to the
+    // Hub; nothing here alters what downstream on this track receives.
+    auto* transport = getPlayHead();
+    if (transport == nullptr)
+        return;
+
+    const auto pos = transport->getPosition();
+    if (! pos || ! pos->getIsPlaying())
+        return;
+
+    const auto ppqOpt = pos->getPpqPosition();
+    if (! ppqOpt)
+        return;
+
+    double bpm = 120.0;
+    if (const auto hostBpm = pos->getBpm(); hostBpm && *hostBpm > 0.0)
+        bpm = *hostBpm;
+
+    const double blockStartPpq = *ppqOpt;
+    const double ppqPerSample = sampleRate > 0.0 ? (bpm / 60.0) / sampleRate : 0.0;
+
+    for (const auto metadata : midiMessages)
+    {
+        const auto message = metadata.getMessage();
+        if (! message.isNoteOnOrOff())
+            continue;
+
+        OrchMergeLink::NoteEvent ev;
+        ev.isNoteOn = message.isNoteOn() && message.getVelocity() > 0;
+        ev.channel = juce::jlimit (1, 16, message.getChannel());
+        ev.note = juce::jlimit (0, 127, message.getNoteNumber());
+        ev.velocity = juce::jlimit (0, 127, static_cast<int> (message.getVelocity()));
+        ev.ppq = blockStartPpq + metadata.samplePosition * ppqPerSample;
+
+        link->pushOutgoingEvent (ev);
+    }
 }
 
 bool OrchMergeAudioProcessor::isHubRoleParamOn() const
