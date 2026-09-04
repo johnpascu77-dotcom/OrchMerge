@@ -111,17 +111,23 @@ private:
     juce::SpinLock outgoingLock;
     std::vector<NoteEvent> outgoingEvents;
 
-    // Hub role: connection threads -> processBlock. `holders` tracks who is
-    // currently sounding a given (channel, note) so a note-off from one
-    // sender never silences a still-sounding note from another sender that
-    // happens to share the same output channel/pitch - the anonymous-merge
-    // correctness problem SS4 of the design doc calls out as the real risk
-    // here (timing jitter, by contrast, is cosmetic until Phase 3).
-    // `bySender` is the reverse index, needed to force-release everything a
-    // Sender was holding if its connection drops without a clean note-off.
+    // Hub role: connection threads -> processBlock. `holdCounts` is how many
+    // holders currently sound a given (channel, note) - a NoteOn is only
+    // relayed downstream when the count goes 0->1 (the first holder), and a
+    // NoteOff only when it goes back to 0 (the last one releasing). This
+    // gates BOTH directions: a note-off from one sender never silences a
+    // still-sounding note from another (SS4 of the design doc), and - the
+    // Phase 2 bug this fixes - a second sender (or the same sender's own
+    // divisi, e.g. a paired "2 Oboi"/"2 Clarinetti" track) hitting a pitch
+    // that's already sounding no longer produces a second stacked notehead
+    // downstream; it just adds to the count. `bySender` is the per-sender
+    // breakdown, needed both to force-release everything a Sender was
+    // holding if its connection drops without a clean note-off, and to
+    // correctly count a single sender holding the same (channel, note) more
+    // than once (real divisi within one track).
     std::mutex hubMutex;
-    std::map<std::pair<int, int>, std::set<std::string>> holders;
-    std::map<std::string, std::set<std::pair<int, int>>> bySender;
+    std::map<std::pair<int, int>, int> holdCounts;
+    std::map<std::string, std::map<std::pair<int, int>, int>> bySender;
     std::map<HubConnection*, std::string> connectionToSender;
     std::vector<std::unique_ptr<HubConnection>> hubConnections;
     std::vector<EmitEvent> readyToEmit;

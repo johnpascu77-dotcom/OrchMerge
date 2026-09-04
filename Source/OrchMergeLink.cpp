@@ -152,7 +152,7 @@ void OrchMergeLink::teardownHub()
         std::lock_guard<std::mutex> lock (hubMutex);
         hubConnections.clear();
         connectionToSender.clear();
-        holders.clear();
+        holdCounts.clear();
         bySender.clear();
         readyToEmit.clear();
     }
@@ -296,32 +296,48 @@ void OrchMergeLink::onHubMessage (HubConnection* connection, const juce::MemoryB
 
     if (decoded.isNoteOn)
     {
-        holders[key].insert (decoded.senderKey);
-        bySender[decoded.senderKey].insert (key);
-        readyToEmit.push_back ({ true, decoded.channel, decoded.note, decoded.velocity });
+        ++bySender[decoded.senderKey][key];
+
+        auto& count = holdCounts[key];
+        const bool isFirstHolder = (count == 0);
+        ++count;
+
+        if (isFirstHolder)
+            readyToEmit.push_back ({ true, decoded.channel, decoded.note, decoded.velocity });
+        // else: this pitch is already sounding downstream from another
+        // holder (a real orchestration doubling, or divisi within one
+        // sender's own track) - just add to the count. This is the Phase 2
+        // fix: previously every NoteOn was relayed unconditionally, so any
+        // unison produced a second/third stacked notehead instead of
+        // merging into the one already-emitted note.
     }
     else
     {
-        auto it = holders.find (key);
-        if (it != holders.end())
+        auto senderIt = bySender.find (decoded.senderKey);
+        if (senderIt != bySender.end())
         {
-            it->second.erase (decoded.senderKey);
-
-            if (it->second.empty())
+            auto keyIt = senderIt->second.find (key);
+            if (keyIt != senderIt->second.end())
             {
-                holders.erase (it);
-                readyToEmit.push_back ({ false, decoded.channel, decoded.note, decoded.velocity });
-            }
-            // else: another sender still holds this (channel, note) - suppress
-            // the note-off so it doesn't kill their still-sounding note (SS4).
-        }
+                if (--keyIt->second <= 0)
+                    senderIt->second.erase (keyIt);
 
-        auto bySenderIt = bySender.find (decoded.senderKey);
-        if (bySenderIt != bySender.end())
-        {
-            bySenderIt->second.erase (key);
-            if (bySenderIt->second.empty())
-                bySender.erase (bySenderIt);
+                auto countIt = holdCounts.find (key);
+                if (countIt != holdCounts.end())
+                {
+                    if (--countIt->second <= 0)
+                    {
+                        holdCounts.erase (countIt);
+                        readyToEmit.push_back ({ false, decoded.channel, decoded.note, decoded.velocity });
+                    }
+                    // else: another holder still sounds this pitch -
+                    // suppress the note-off so it doesn't kill their
+                    // still-sounding note (SS4 of the design doc).
+                }
+            }
+
+            if (senderIt->second.empty())
+                bySender.erase (senderIt);
         }
     }
 
@@ -372,16 +388,16 @@ void OrchMergeLink::releaseAllForSender (const std::string& senderKey)
     if (bySenderIt == bySender.end())
         return;
 
-    for (const auto& key : bySenderIt->second)
+    for (const auto& [key, heldCount] : bySenderIt->second)
     {
-        auto it = holders.find (key);
-        if (it == holders.end())
+        auto countIt = holdCounts.find (key);
+        if (countIt == holdCounts.end())
             continue;
 
-        it->second.erase (senderKey);
-        if (it->second.empty())
+        countIt->second -= heldCount;
+        if (countIt->second <= 0)
         {
-            holders.erase (it);
+            holdCounts.erase (countIt);
             readyToEmit.push_back ({ false, key.first, key.second, 0 });
         }
     }
