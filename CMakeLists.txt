@@ -39,6 +39,22 @@ target_sources(OrchMerge
         Source/OrchMergeLink.cpp
 )
 
+# Regenerated on EVERY build (add_custom_target has no file-based up-to-date
+# check, unlike add_custom_command(OUTPUT ...)) so the editor's build label
+# always reflects the actual latest build, even when only a different .cpp
+# changed and this one wasn't recompiled for its own sake.
+set(ORCHMERGE_BUILD_TIMESTAMP_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/OrchMergeBuildTimestamp.h")
+add_custom_target(OrchMergeStampBuildTime ALL
+    COMMAND ${CMAKE_COMMAND}
+            -DHEADER_PATH=${ORCHMERGE_BUILD_TIMESTAMP_HEADER}
+            -DMACRO_NAME=ORCHMERGE_BUILD_TIMESTAMP
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/GenerateBuildTimestamp.cmake"
+    BYPRODUCTS "${ORCHMERGE_BUILD_TIMESTAMP_HEADER}"
+    COMMENT "Stamping OrchMerge build timestamp"
+)
+add_dependencies(OrchMerge OrchMergeStampBuildTime)
+target_include_directories(OrchMerge PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
 target_compile_definitions(OrchMerge
     PUBLIC
         JUCE_WEB_BROWSER=0

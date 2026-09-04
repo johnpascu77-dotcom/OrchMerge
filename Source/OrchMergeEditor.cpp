@@ -1,4 +1,5 @@
 #include "OrchMergeEditor.h"
+#include "OrchMergeBuildTimestamp.h"
 
 OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
@@ -7,7 +8,11 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     titleLabel.setFont (juce::Font (juce::FontOptions (20.0f, juce::Font::bold)));
     addAndMakeVisible (titleLabel);
 
-    subtitleLabel.setText ("Phase 3 - Hub ppq-aware emit buffer  |  compiled " __DATE__ " " __TIME__,
+    // ORCHMERGE_BUILD_TIMESTAMP comes from a header CMake regenerates on
+    // EVERY build (see GenerateBuildTimestamp.cmake) - unlike __DATE__/
+    // __TIME__ baked into this one .cpp, it stays accurate even when an
+    // incremental build only recompiled a different file for its own fix.
+    subtitleLabel.setText ("Phase 3 - Hub ppq-aware emit buffer  |  compiled " ORCHMERGE_BUILD_TIMESTAMP,
                             juce::dontSendNotification);
     subtitleLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
     subtitleLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
