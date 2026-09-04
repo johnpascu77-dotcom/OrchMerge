@@ -300,8 +300,15 @@ void OrchMergeLink::onHubMessage (HubConnection* connection, const juce::MemoryB
     }
 
     const auto key = std::make_pair (decoded.channel, decoded.note);
-    const auto marginMs = static_cast<juce::int64> (processor.getHubMarginMs());
-    const auto readyAtMs = juce::Time::currentTimeMillis() + marginMs;
+
+    // Convert the wall-clock margin param into beats at the tempo the Hub's
+    // own transport reports right now (setCurrentBpm, called each block from
+    // processBlock) so readiness is gated on the same shared ppq timeline
+    // drainEmitEvents places events on - not on whenever this message
+    // happened to arrive on its own connection thread.
+    const auto marginMs = static_cast<double> (processor.getHubMarginMs());
+    const auto marginBeats = (marginMs / 1000.0) * (currentBpm.load() / 60.0);
+    const auto readyAtPpq = decoded.ppq + marginBeats;
 
     if (decoded.isNoteOn)
     {
@@ -312,7 +319,7 @@ void OrchMergeLink::onHubMessage (HubConnection* connection, const juce::MemoryB
         ++count;
 
         if (isFirstHolder)
-            pendingEmits.push_back ({ readyAtMs, decoded.ppq,
+            pendingEmits.push_back ({ readyAtPpq, decoded.ppq,
                                        { true, decoded.channel, decoded.note, decoded.velocity, 0 } });
         // else: this pitch is already sounding downstream from another
         // holder (a real orchestration doubling, or divisi within one
@@ -338,7 +345,7 @@ void OrchMergeLink::onHubMessage (HubConnection* connection, const juce::MemoryB
                     if (--countIt->second <= 0)
                     {
                         holdCounts.erase (countIt);
-                        pendingEmits.push_back ({ readyAtMs, decoded.ppq,
+                        pendingEmits.push_back ({ readyAtPpq, decoded.ppq,
                                                    { false, decoded.channel, decoded.note, decoded.velocity, 0 } });
                     }
                     // else: another holder still sounds this pitch -
@@ -409,7 +416,7 @@ void OrchMergeLink::releaseAllForSender (const std::string& senderKey)
         if (countIt->second <= 0)
         {
             holdCounts.erase (countIt);
-            pendingEmits.push_back ({ juce::Time::currentTimeMillis(), kImmediatePpq,
+            pendingEmits.push_back ({ kImmediatePpq, kImmediatePpq,
                                        { false, key.first, key.second, 0, 0 } });
         }
     }
@@ -431,33 +438,33 @@ std::vector<OrchMergeLink::EmitEvent> OrchMergeLink::drainEmitEvents (
     if (! hubMutex.try_lock())
         return out;
 
-    const auto now = juce::Time::currentTimeMillis();
+    // readyAtPpq is gated against this block's END, not its start: an event
+    // becomes eligible the moment playback reaches the point where its own
+    // margin has elapsed, which may be partway through the current block.
+    const double blockEndPpq = blockStartPpq + static_cast<double> (numSamples) * ppqPerSample;
+
     std::vector<PendingEmit> stillPending;
     stillPending.reserve (pendingEmits.size());
 
     for (const auto& pending : pendingEmits)
     {
-        if (now < pending.readyAtMs)
+        if (ppqPerSample > 0.0 && pending.readyAtPpq > blockEndPpq)
         {
             stillPending.push_back (pending);
             continue;
         }
 
+        // No separate "has pending.ppq itself arrived yet" check is needed
+        // here: readyAtPpq = ppq + marginBeats with marginBeats >= 0, so
+        // readyAtPpq <= blockEndPpq (just tested above) already implies
+        // ppq <= blockEndPpq. A ppq that lands before blockStartPpq (the
+        // event waited across more than one block) is simply clamped to
+        // sample 0 below, same as it always was.
         int sampleOffset = 0;
 
         if (ppqPerSample > 0.0 && pending.ppq > kImmediatePpq)
         {
             const double samplesFromBlockStart = (pending.ppq - blockStartPpq) / ppqPerSample;
-
-            if (samplesFromBlockStart >= static_cast<double> (numSamples))
-            {
-                // Its musical position hasn't arrived in playback yet - hold
-                // it for a later block (rare: a short margin combined with a
-                // very fast transport).
-                stillPending.push_back (pending);
-                continue;
-            }
-
             sampleOffset = juce::jlimit (0, juce::jmax (0, numSamples - 1),
                                           static_cast<int> (std::llround (samplesFromBlockStart)));
         }

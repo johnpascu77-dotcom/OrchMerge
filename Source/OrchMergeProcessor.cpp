@@ -80,6 +80,7 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
                         bpm = *hostBpm;
 
                     ppqPerSample = sampleRate > 0.0 ? (bpm / 60.0) / sampleRate : 0.0;
+                    link->setCurrentBpm (bpm);
                 }
             }
         }

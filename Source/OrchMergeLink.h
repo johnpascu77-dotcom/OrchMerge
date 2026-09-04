@@ -25,11 +25,14 @@ class OrchMergeAudioProcessor;
 // SEPARATE onset groups at the downstream reducer, each of which correctly
 // (from its own local view) kept and re-emitted the same pitch - confirmed
 // by inspecting the actual captured MIDI, not guessed. hubMarginMs (SS3 of
-// the design doc) holds each decided-to-emit event for that many ms of wall-
-// clock slack, then maps its ORIGINAL ppq to a sample position in whatever
-// block is playing by the time the margin elapses - same technique as
-// OrchPiano's own flushPlanBuffer/emitSampleFor, just ms-scaled (absorbing
-// relay jitter) rather than beat-scaled (a musical lookahead).
+// the design doc) holds each decided-to-emit event for that many ms worth of
+// BEATS at the Hub's current tempo (converted via setCurrentBpm, since the
+// margin must be gated on the same shared ppq timeline placement uses - an
+// event's readiness can't depend on which connection thread happened to
+// deliver it soonest, only on musical position), then maps its ORIGINAL ppq
+// to a sample position in whatever block is playing by the time the margin
+// elapses - same technique as OrchPiano's own flushPlanBuffer/emitSampleFor,
+// just applied to relay jitter instead of a lookahead window.
 //
 // ALL socket work stays off the host message thread (feedback_no_message_
 // thread_ipc_at_scale / OrchCaptureLink's own Phase-2 lesson): connection
@@ -78,10 +81,13 @@ public:
     // ---- Hub role: processBlock drains what's ready to emit right now ----
     // Called once per block with the block's own ppq mapping (or ppqPerSample
     // 0.0 if the host isn't reporting ppq - everything just emits at sample 0
-    // then, same as Phase 2). Only returns events whose hubMarginMs has
-    // elapsed AND whose target ppq has actually arrived in this block (an
-    // event due before the transport gets there is simply held for a later
-    // block - rare, only possible with a very short margin).
+    // then, same as Phase 2). Only returns events whose readyAtPpq (the
+    // event's own ppq plus hubMarginMs converted to beats at the current
+    // tempo - see setCurrentBpm) has been reached by this block's end. Gating
+    // on the shared musical timeline instead of wall-clock arrival time means
+    // two genuinely-simultaneous cross-sender notes become ready in the same
+    // Hub block regardless of ordinary socket/thread relay jitter between
+    // when each Sender's message actually reaches the Hub.
     struct EmitEvent
     {
         bool isNoteOn = true;
@@ -89,6 +95,13 @@ public:
         int sampleOffset = 0;
     };
     std::vector<EmitEvent> drainEmitEvents (double blockStartPpq, double ppqPerSample, int numSamples);
+
+    // Hub role: processBlock reports the shared transport's current bpm every
+    // block so onHubMessage (running on a connection thread, arbitrary wall-
+    // clock arrival time) can convert hubMarginMs into an equivalent ppq
+    // offset on the same musical timeline the block-placement math already
+    // uses - see the readyAtPpq rationale on PendingEmit below.
+    void setCurrentBpm (double bpm) { currentBpm.store (bpm > 0.0 ? bpm : 120.0); }
 
 private:
     class SenderConnection;
@@ -116,6 +129,7 @@ private:
     std::atomic<bool> senderConnected { false };
     std::atomic<int> connectedSenderCount { 0 };
     std::atomic<juce::int64> lastRelayedNoteMs { 0 };
+    std::atomic<double> currentBpm { 120.0 };
 
     // owned + touched only by the worker thread (run())
     std::unique_ptr<SenderConnection> sender;
@@ -147,13 +161,17 @@ private:
     std::vector<std::unique_ptr<HubConnection>> hubConnections;
 
     // An event that has passed the holdCounts gate above still waits here
-    // until hubMarginMs of real time has elapsed since it arrived - see
-    // drainEmitEvents(). A force-release from a dropped connection uses
-    // kImmediatePpq so it emits on the very next block regardless of margin
-    // (there is no "correct" musical position for an out-of-band release).
+    // until readyAtPpq (its own ppq plus hubMarginMs worth of beats at the
+    // tempo in effect when it arrived) has been reached by the Hub block's
+    // ppq window - see drainEmitEvents(). ppq is the event's TRUE musical
+    // position, used for sample-offset placement once it's ready; readyAtPpq
+    // is only the readiness gate, always >= ppq. A force-release from a
+    // dropped connection sets both to kImmediatePpq so it emits on the very
+    // next block regardless of margin (there is no "correct" musical
+    // position for an out-of-band release).
     struct PendingEmit
     {
-        juce::int64 readyAtMs = 0;
+        double readyAtPpq = 0.0;
         double ppq = 0.0;
         EmitEvent event;
     };
