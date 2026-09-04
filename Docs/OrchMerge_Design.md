@@ -77,6 +77,27 @@ This margin is a **latency-jitter absorber**, not a musical lookahead — it's w
 in milliseconds, not beats (an IPC relay hiccup doesn't scale with tempo the way phrase-level
 lookahead does).
 
+**2026-09-04 correction (Phase 3b): the readiness *gate* itself must be ppq-based, not wall-clock.**
+The first Phase-3 cut (`820c9de`) computed `readyAtMs = juce::Time::currentTimeMillis() + hubMarginMs`
+at the moment each message arrived on its own connection thread — so two genuinely-simultaneous
+cross-sender notes, delayed by different amounts of ordinary socket/thread relay jitter before
+reaching `onHubMessage`, could become *ready* in two different Hub audio blocks purely from that
+arrival-order noise, not from anything musical. Once that happened, the later-draining one's sample
+offset (computed from `(pending.ppq - blockStartPpq)`) would land in a later block than the first,
+reintroducing exactly the split-onset symptom this phase exists to prevent — with no wrong note
+count, so it would not show up as a simple note-diff, only as timing/onset-grouping drift.
+
+Fixed (`e21a803`) by converting `hubMarginMs` into an equivalent number of **beats** at the Hub's
+current tempo (`OrchMergeLink::setCurrentBpm`, fed each block from the same `bpm` the Hub's
+`processBlock` already computes) and gating `PendingEmit::readyAtPpq = event.ppq + marginBeats`
+against the block's own ppq window instead of against wall-clock time. Two simultaneous notes now
+become ready together regardless of relay jitter, because readiness is measured on the same shared
+musical timeline the sample-offset placement always used. Not yet Bitwig-tested at scale (the
+original 13-sender jitter symptom that motivated Phase 3 was diagnosed away from this exact
+mechanism only speculatively — the real root cause turned out to be OrchPiano's own onset-group
+scan, `78c0136` — so this fix closes a real, code-grounded gap but is not yet confirmed to be
+audible in practice).
+
 ### 3.1 Combined delay — a deliberately accepted simplification
 
 The Hub adds `hubMarginMs` of delay on top of whatever `lookaheadBeats` OrchPiano itself adds
