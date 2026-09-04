@@ -5,15 +5,16 @@
 
 class OrchMergeLink;
 
-// OrchMerge - Phase 2: Hub naive merge.
+// OrchMerge - Phase 3: Hub ppq-aware emit buffer.
 //
 // Dropped on every source track (Sender role, default) plus one Hub track
 // (Hub role). A Sender never alters the MIDI passing through its own track -
 // it only *observes* note on/off events (tagged with its own ppq) to forward
 // to the Hub via OrchMergeLink. The Hub track's own incoming MIDI is not
 // relevant - its processBlock instead emits whatever the Link has merged from
-// every connected Sender, immediately on receipt (no ppq-aware placement yet;
-// that's Phase 3, see Docs/OrchMerge_Design.md SS3).
+// every connected Sender, each placed at the sample position its own ppq
+// maps to once hubMarginMs of relay jitter has been absorbed (see
+// OrchMergeLink and Docs/OrchMerge_Design.md SS3).
 class OrchMergeAudioProcessor final : public juce::AudioProcessor
 {
 public:
@@ -52,11 +53,17 @@ public:
     // true when the `role` param is set to Hub.
     bool isHubRoleParamOn() const;
 
+    // Hub role only: how long (ms of wall-clock time) the Hub holds a
+    // decided-to-emit event before placing it, absorbing Sender-to-Hub relay
+    // jitter. See OrchMergeLink.
+    int getHubMarginMs() const;
+
     OrchMergeLink& getLink() { return *link; }
 
 private:
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* roleParam = nullptr;
+    std::atomic<float>* hubMarginMsParam = nullptr;
 
     double sampleRate = 44100.0;
 

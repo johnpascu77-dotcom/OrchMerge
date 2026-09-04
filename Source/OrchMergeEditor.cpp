@@ -7,7 +7,7 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     titleLabel.setFont (juce::Font (juce::FontOptions (20.0f, juce::Font::bold)));
     addAndMakeVisible (titleLabel);
 
-    subtitleLabel.setText ("Phase 2 - Hub naive merge  |  compiled " __DATE__ " " __TIME__,
+    subtitleLabel.setText ("Phase 3 - Hub ppq-aware emit buffer  |  compiled " __DATE__ " " __TIME__,
                             juce::dontSendNotification);
     subtitleLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
     subtitleLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
@@ -21,13 +21,22 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     roleAttachment = std::make_unique<ComboBoxAttachment> (
         audioProcessor.getParameters(), "role", roleBox);
 
+    marginLabel.setText ("Hub Margin (ms)", juce::dontSendNotification);
+    addAndMakeVisible (marginLabel);
+
+    marginSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    marginSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 50, 20);
+    addAndMakeVisible (marginSlider);
+    marginAttachment = std::make_unique<SliderAttachment> (
+        audioProcessor.getParameters(), "hubMarginMs", marginSlider);
+
     statusLabel.setJustificationType (juce::Justification::topLeft);
     addAndMakeVisible (statusLabel);
 
     updateStatus();
     startTimerHz (4);
 
-    setSize (440, 200);
+    setSize (440, 230);
 }
 
 OrchMergeAudioProcessorEditor::~OrchMergeAudioProcessorEditor()
@@ -95,6 +104,12 @@ void OrchMergeAudioProcessorEditor::resized()
     auto roleRow = area.removeFromTop (26);
     roleLabel.setBounds (roleRow.removeFromLeft (50));
     roleBox.setBounds (roleRow);
+
+    area.removeFromTop (8);
+
+    auto marginRow = area.removeFromTop (26);
+    marginLabel.setBounds (marginRow.removeFromLeft (110));
+    marginSlider.setBounds (marginRow);
 
     area.removeFromTop (12);
     statusLabel.setBounds (area);

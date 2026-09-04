@@ -2,6 +2,7 @@
 #include "OrchMergeProcessor.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -9,6 +10,12 @@ namespace
     constexpr int kActivePollMs = 5;     // Sender connected: drain the outgoing queue promptly
     constexpr int kConnectTimeoutMs = 300; // blocking connect - worker thread only, never the message thread
     constexpr size_t kMaxQueuedOutgoing = 4096; // safety rail if the Hub side stalls
+
+    // Sentinel ppq for a force-released note-off (a dropped Sender connection):
+    // there is no "correct" musical position for an out-of-band release, so
+    // drainEmitEvents should always treat it as already due, regardless of
+    // whatever block is currently playing.
+    constexpr double kImmediatePpq = -1.0e9;
 
     // Fixed 28-byte wire message: type(1) + senderUid(16) + channel(1) +
     // note(1) + velocity(1) + ppq(8, double). Deliberately not JSON (unlike
@@ -154,7 +161,7 @@ void OrchMergeLink::teardownHub()
         connectionToSender.clear();
         holdCounts.clear();
         bySender.clear();
-        readyToEmit.clear();
+        pendingEmits.clear();
     }
     connectedSenderCount.store (0);
 
@@ -293,6 +300,8 @@ void OrchMergeLink::onHubMessage (HubConnection* connection, const juce::MemoryB
     }
 
     const auto key = std::make_pair (decoded.channel, decoded.note);
+    const auto marginMs = static_cast<juce::int64> (processor.getHubMarginMs());
+    const auto readyAtMs = juce::Time::currentTimeMillis() + marginMs;
 
     if (decoded.isNoteOn)
     {
@@ -303,13 +312,14 @@ void OrchMergeLink::onHubMessage (HubConnection* connection, const juce::MemoryB
         ++count;
 
         if (isFirstHolder)
-            readyToEmit.push_back ({ true, decoded.channel, decoded.note, decoded.velocity });
+            pendingEmits.push_back ({ readyAtMs, decoded.ppq,
+                                       { true, decoded.channel, decoded.note, decoded.velocity, 0 } });
         // else: this pitch is already sounding downstream from another
         // holder (a real orchestration doubling, or divisi within one
-        // sender's own track) - just add to the count. This is the Phase 2
-        // fix: previously every NoteOn was relayed unconditionally, so any
-        // unison produced a second/third stacked notehead instead of
-        // merging into the one already-emitted note.
+        // sender's own track) - just add to the count. Previously every
+        // NoteOn was relayed unconditionally, so any unison produced a
+        // second/third stacked notehead instead of merging into the one
+        // already-emitted note.
     }
     else
     {
@@ -328,7 +338,8 @@ void OrchMergeLink::onHubMessage (HubConnection* connection, const juce::MemoryB
                     if (--countIt->second <= 0)
                     {
                         holdCounts.erase (countIt);
-                        readyToEmit.push_back ({ false, decoded.channel, decoded.note, decoded.velocity });
+                        pendingEmits.push_back ({ readyAtMs, decoded.ppq,
+                                                   { false, decoded.channel, decoded.note, decoded.velocity, 0 } });
                     }
                     // else: another holder still sounds this pitch -
                     // suppress the note-off so it doesn't kill their
@@ -398,7 +409,8 @@ void OrchMergeLink::releaseAllForSender (const std::string& senderKey)
         if (countIt->second <= 0)
         {
             holdCounts.erase (countIt);
-            readyToEmit.push_back ({ false, key.first, key.second, 0 });
+            pendingEmits.push_back ({ juce::Time::currentTimeMillis(), kImmediatePpq,
+                                       { false, key.first, key.second, 0, 0 } });
         }
     }
 
@@ -407,19 +419,56 @@ void OrchMergeLink::releaseAllForSender (const std::string& senderKey)
 
 // ---- Hub side (audio thread) ----
 
-std::vector<OrchMergeLink::EmitEvent> OrchMergeLink::drainEmitEvents()
+std::vector<OrchMergeLink::EmitEvent> OrchMergeLink::drainEmitEvents (
+    double blockStartPpq, double ppqPerSample, int numSamples)
 {
     std::vector<EmitEvent> out;
 
     // try_lock, not lock: the audio thread must never block on IPC-side
     // contention. If a connection thread holds hubMutex right now, these
     // events simply wait for the next block - a few milliseconds, harmless
-    // for Phase 2's "naive, not sample-accurate" merge.
-    if (hubMutex.try_lock())
+    // given hubMarginMs is already tens of ms.
+    if (! hubMutex.try_lock())
+        return out;
+
+    const auto now = juce::Time::currentTimeMillis();
+    std::vector<PendingEmit> stillPending;
+    stillPending.reserve (pendingEmits.size());
+
+    for (const auto& pending : pendingEmits)
     {
-        out.swap (readyToEmit);
-        hubMutex.unlock();
+        if (now < pending.readyAtMs)
+        {
+            stillPending.push_back (pending);
+            continue;
+        }
+
+        int sampleOffset = 0;
+
+        if (ppqPerSample > 0.0 && pending.ppq > kImmediatePpq)
+        {
+            const double samplesFromBlockStart = (pending.ppq - blockStartPpq) / ppqPerSample;
+
+            if (samplesFromBlockStart >= static_cast<double> (numSamples))
+            {
+                // Its musical position hasn't arrived in playback yet - hold
+                // it for a later block (rare: a short margin combined with a
+                // very fast transport).
+                stillPending.push_back (pending);
+                continue;
+            }
+
+            sampleOffset = juce::jlimit (0, juce::jmax (0, numSamples - 1),
+                                          static_cast<int> (std::llround (samplesFromBlockStart)));
+        }
+
+        EmitEvent ev = pending.event;
+        ev.sampleOffset = sampleOffset;
+        out.push_back (ev);
     }
+
+    pendingEmits.swap (stillPending);
+    hubMutex.unlock();
 
     return out;
 }

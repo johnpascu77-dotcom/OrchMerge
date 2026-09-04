@@ -12,13 +12,24 @@
 
 class OrchMergeAudioProcessor;
 
-// Phase 2: Hub naive merge. A Sender pushes each note on/off it observes
-// (tagged with its own ppq) to the Hub over a small fixed-size binary
-// message - unlike OrchCaptureLink's once-per-take JSON blob, this runs
-// continuously for the life of the transport, so per-message overhead
-// actually matters (see Docs/OrchMerge_Design.md SS6). The Hub relays
-// immediately on receipt - there is no ppq-aware emit buffer yet, that is
-// Phase 3 (SS3 of the design doc).
+// Phase 3: Hub ppq-aware emit buffer. A Sender pushes each note on/off it
+// observes (tagged with its own ppq) to the Hub over a small fixed-size
+// binary message - unlike OrchCaptureLink's once-per-take JSON blob, this
+// runs continuously for the life of the transport, so per-message overhead
+// actually matters (see Docs/OrchMerge_Design.md SS6).
+//
+// The Hub does NOT relay immediately on receipt: a live 13-sender test (all
+// senders share the same Bitwig transport, so ppq is a directly comparable
+// shared timeline) showed genuine cross-instrument unisons arriving spread
+// out by ordinary socket/thread relay jitter widely enough to land in
+// SEPARATE onset groups at the downstream reducer, each of which correctly
+// (from its own local view) kept and re-emitted the same pitch - confirmed
+// by inspecting the actual captured MIDI, not guessed. hubMarginMs (SS3 of
+// the design doc) holds each decided-to-emit event for that many ms of wall-
+// clock slack, then maps its ORIGINAL ppq to a sample position in whatever
+// block is playing by the time the margin elapses - same technique as
+// OrchPiano's own flushPlanBuffer/emitSampleFor, just ms-scaled (absorbing
+// relay jitter) rather than beat-scaled (a musical lookahead).
 //
 // ALL socket work stays off the host message thread (feedback_no_message_
 // thread_ipc_at_scale / OrchCaptureLink's own Phase-2 lesson): connection
@@ -65,15 +76,19 @@ public:
     void pushOutgoingEvent (const NoteEvent&);
 
     // ---- Hub role: processBlock drains what's ready to emit right now ----
-    // Phase 2 is naive: every event a connection thread has decided to relay
-    // (after the note-off gating in SS4 of the design doc) is ready for the
-    // very next block - there is no ppq-aware placement yet.
+    // Called once per block with the block's own ppq mapping (or ppqPerSample
+    // 0.0 if the host isn't reporting ppq - everything just emits at sample 0
+    // then, same as Phase 2). Only returns events whose hubMarginMs has
+    // elapsed AND whose target ppq has actually arrived in this block (an
+    // event due before the transport gets there is simply held for a later
+    // block - rare, only possible with a very short margin).
     struct EmitEvent
     {
         bool isNoteOn = true;
         int channel = 1, note = 60, velocity = 100;
+        int sampleOffset = 0;
     };
-    std::vector<EmitEvent> drainEmitEvents();
+    std::vector<EmitEvent> drainEmitEvents (double blockStartPpq, double ppqPerSample, int numSamples);
 
 private:
     class SenderConnection;
@@ -130,7 +145,19 @@ private:
     std::map<std::string, std::map<std::pair<int, int>, int>> bySender;
     std::map<HubConnection*, std::string> connectionToSender;
     std::vector<std::unique_ptr<HubConnection>> hubConnections;
-    std::vector<EmitEvent> readyToEmit;
+
+    // An event that has passed the holdCounts gate above still waits here
+    // until hubMarginMs of real time has elapsed since it arrived - see
+    // drainEmitEvents(). A force-release from a dropped connection uses
+    // kImmediatePpq so it emits on the very next block regardless of margin
+    // (there is no "correct" musical position for an out-of-band release).
+    struct PendingEmit
+    {
+        juce::int64 readyAtMs = 0;
+        double ppq = 0.0;
+        EmitEvent event;
+    };
+    std::vector<PendingEmit> pendingEmits;
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (OrchMergeLink)
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OrchMergeLink)

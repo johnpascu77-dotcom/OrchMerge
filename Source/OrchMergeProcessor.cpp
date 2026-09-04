@@ -7,6 +7,7 @@ OrchMergeAudioProcessor::OrchMergeAudioProcessor()
       parameters (*this, nullptr, "OrchMergeParameters", createParameterLayout())
 {
     roleParam = parameters.getRawParameterValue ("role");
+    hubMarginMsParam = parameters.getRawParameterValue ("hubMarginMs");
 
     link = std::make_unique<OrchMergeLink> (*this);
 }
@@ -27,6 +28,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout OrchMergeAudioProcessor::cre
     params.push_back (std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID { "role", 1 }, "Role",
         juce::StringArray { "Sender", "Hub" }, 0));
+
+    // Hub role only: wall-clock slack held before placing a decided-to-emit
+    // event, absorbing Sender-to-Hub relay jitter so genuinely-simultaneous
+    // cross-instrument unisons land close enough together for a downstream
+    // reducer's own onset grouping to still see them as one onset. Default
+    // 60ms - see Docs/OrchMerge_Design.md SS3.
+    params.push_back (std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID { "hubMarginMs", 1 }, "Hub Margin (ms)", 10, 500, 60));
 
     return { params.begin(), params.end() };
 }
@@ -51,15 +60,36 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     {
         // Hub: this track carries no source material of its own - whatever
         // arrived on it is discarded, and it emits only what the Link has
-        // decided (from every connected Sender) is ready to relay right now.
+        // decided (from every connected Sender) is ready to place in this
+        // block, at the sample position its own ppq maps to.
         midiMessages.clear();
 
-        for (const auto& ev : link->drainEmitEvents())
+        double blockStartPpq = 0.0;
+        double ppqPerSample = 0.0;
+
+        if (auto* transport = getPlayHead())
+        {
+            if (const auto pos = transport->getPosition())
+            {
+                if (const auto ppqOpt = pos->getPpqPosition())
+                {
+                    blockStartPpq = *ppqOpt;
+
+                    double bpm = 120.0;
+                    if (const auto hostBpm = pos->getBpm(); hostBpm && *hostBpm > 0.0)
+                        bpm = *hostBpm;
+
+                    ppqPerSample = sampleRate > 0.0 ? (bpm / 60.0) / sampleRate : 0.0;
+                }
+            }
+        }
+
+        for (const auto& ev : link->drainEmitEvents (blockStartPpq, ppqPerSample, buffer.getNumSamples()))
         {
             const auto message = ev.isNoteOn
                 ? juce::MidiMessage::noteOn (ev.channel, ev.note, static_cast<juce::uint8> (ev.velocity))
                 : juce::MidiMessage::noteOff (ev.channel, ev.note, static_cast<juce::uint8> (ev.velocity));
-            midiMessages.addEvent (message, 0);
+            midiMessages.addEvent (message, ev.sampleOffset);
         }
 
         return;
@@ -107,6 +137,11 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 bool OrchMergeAudioProcessor::isHubRoleParamOn() const
 {
     return roleParam != nullptr && roleParam->load() > 0.5f;
+}
+
+int OrchMergeAudioProcessor::getHubMarginMs() const
+{
+    return hubMarginMsParam != nullptr ? juce::roundToInt (hubMarginMsParam->load()) : 60;
 }
 
 juce::AudioProcessorEditor* OrchMergeAudioProcessor::createEditor()
