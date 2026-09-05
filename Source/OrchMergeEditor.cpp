@@ -12,7 +12,7 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     // EVERY build (see GenerateBuildTimestamp.cmake) - unlike __DATE__/
     // __TIME__ baked into this one .cpp, it stays accurate even when an
     // incremental build only recompiled a different file for its own fix.
-    subtitleLabel.setText ("Phase 3 - Hub ppq-aware emit buffer  |  compiled " ORCHMERGE_BUILD_TIMESTAMP,
+    subtitleLabel.setText ("Fix: release held notes on transport stop  |  compiled " ORCHMERGE_BUILD_TIMESTAMP,
                             juce::dontSendNotification);
     subtitleLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
     subtitleLabel.setColour (juce::Label::textColourId, juce::Colours::grey);

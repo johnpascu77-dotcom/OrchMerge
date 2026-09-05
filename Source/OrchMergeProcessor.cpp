@@ -82,6 +82,11 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
                     ppqPerSample = sampleRate > 0.0 ? (bpm / 60.0) / sampleRate : 0.0;
                     link->setCurrentBpm (bpm);
                 }
+
+                const bool playing = pos->getIsPlaying();
+                if (wasPlaying && ! playing)
+                    link->releaseAllHeld();
+                wasPlaying = playing;
             }
         }
 

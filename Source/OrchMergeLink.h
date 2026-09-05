@@ -103,6 +103,21 @@ public:
     // uses - see the readyAtPpq rationale on PendingEmit below.
     void setCurrentBpm (double bpm) { currentBpm.store (bpm > 0.0 ? bpm : 120.0); }
 
+    // Hub role: processBlock calls this once on the playing->stopped edge.
+    // A note held at the exact moment the transport stops is never released
+    // by the normal path - a Sender's own processBlock returns immediately
+    // when the host isn't playing (see OrchMergeProcessor::processBlock), so
+    // it never observes/forwards that note's eventual note-off, and nothing
+    // here previously checked play-state at all. The result was a note stuck
+    // in `holdCounts` forever: visibly a hung MIDI note downstream, and
+    // invisibly worse on the NEXT take - a fresh note-on for that same pitch
+    // finds `holdCounts` already non-zero, so isFirstHolder is false and the
+    // new attack is silently swallowed as "already sounding" instead of
+    // relayed. Force-releases everything currently held, the same way
+    // releaseAllForSender already does for a single dropped connection, just
+    // for every sender's holdings at once.
+    void releaseAllHeld();
+
 private:
     class SenderConnection;
     class HubConnection;

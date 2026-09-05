@@ -424,6 +424,20 @@ void OrchMergeLink::releaseAllForSender (const std::string& senderKey)
     bySender.erase (bySenderIt);
 }
 
+void OrchMergeLink::releaseAllHeld()
+{
+    std::lock_guard<std::mutex> lock (hubMutex);
+
+    for (const auto& [key, count] : holdCounts)
+    {
+        if (count > 0)
+            pendingEmits.push_back ({ kImmediatePpq, kImmediatePpq,
+                                       { false, key.first, key.second, 0, 0 } });
+    }
+    holdCounts.clear();
+    bySender.clear();
+}
+
 // ---- Hub side (audio thread) ----
 
 std::vector<OrchMergeLink::EmitEvent> OrchMergeLink::drainEmitEvents (

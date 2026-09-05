@@ -66,6 +66,7 @@ private:
     std::atomic<float>* hubMarginMsParam = nullptr;
 
     double sampleRate = 44100.0;
+    bool wasPlaying = false; // Hub role: detects the playing->stopped edge
 
     std::unique_ptr<OrchMergeLink> link;
 
