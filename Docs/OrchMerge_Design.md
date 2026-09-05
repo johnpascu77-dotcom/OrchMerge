@@ -190,3 +190,33 @@ take's note-ons for the previously-stuck pitch aren't swallowed.
 - Should `role` default to Sender (safe - a freshly-dropped instance never accidentally tries to
   bind a port another instance already owns) - yes, matches OrchCaptureLink's own default
   (`coordinator` param OFF = Client).
+
+## 5c. Sender keyswitch-zone exclusion, `61928fc` (2026-09-05)
+
+Root-caused live via the actual full-rig capture: a 24-note cluster of near-duplicate
+pitches 24-30 landed on OrchPiano's reduction channel at take-start - one
+keyswitch/articulation-select firing per instrument, all together. Confirmed against the
+real device chain (user's own screenshot): each Sender sits right after that track's own
+OrchNoteMapper, which has already remapped the ecosystem's shared keyswitch **source**
+zone (12-23) into **that instrument's own destination range** (seen live: flute lands in
+24-33) before the Sender ever taps the signal. A downstream reducer with no keyswitch
+concept at all (grepped OrchPiano's entire source - zero matches) has no way to tell these
+apart from real notes.
+
+Two things ruled out first, both by reasoning through the actual chain rather than
+guessing: the per-track OrchCapture instance sitting *after* OrchPiano can't fix this (it
+only affects what it exports, once OrchPiano has already reduced the contaminated input),
+and even if it could, its own default KS zone (12-23) wouldn't match anyway - the
+contamination is already past `OrchNoteMapper`'s remap, sitting in the destination range.
+
+**Fix**: new Sender-only params, off by default (existing rigs see no behavior change) -
+`excludeKsNotes` (bool), `ksZoneMin`/`ksZoneMax` (default 24-35, matching this ecosystem's
+own "orchestra" destination convention, but genuinely **per-instance** since the actual
+destination range differs by instrument - e.g. bass instruments land in 72-83 elsewhere in
+this rig, per this ecosystem's own prior keyswitch-unification work). A note inside the
+zone is simply never observed/forwarded to the Hub in `OrchMergeAudioProcessor::processBlock`'s
+Sender branch - the real instrument downstream of that same Sender on that same track still
+receives the note untouched either way, since Sender stays a transparent pass-through by
+design. Builds clean, reinstalled. **Not yet Bitwig-tested live** - next step is enabling
+this on the affected instrument tracks with each one's own actual destination range and
+confirming the cluster is gone from a fresh capture.
