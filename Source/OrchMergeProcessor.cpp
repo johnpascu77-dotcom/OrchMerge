@@ -2,12 +2,17 @@
 #include "OrchMergeEditor.h"
 #include "OrchMergeLink.h"
 
+#include <utility>
+
 OrchMergeAudioProcessor::OrchMergeAudioProcessor()
     : AudioProcessor (BusesProperties()),
       parameters (*this, nullptr, "OrchMergeParameters", createParameterLayout())
 {
     roleParam = parameters.getRawParameterValue ("role");
     hubMarginMsParam = parameters.getRawParameterValue ("hubMarginMs");
+    excludeKsNotesParam = parameters.getRawParameterValue ("excludeKsNotes");
+    ksZoneMinParam = parameters.getRawParameterValue ("ksZoneMin");
+    ksZoneMaxParam = parameters.getRawParameterValue ("ksZoneMax");
 
     link = std::make_unique<OrchMergeLink> (*this);
 }
@@ -36,6 +41,25 @@ juce::AudioProcessorValueTreeState::ParameterLayout OrchMergeAudioProcessor::cre
     // 60ms - see Docs/OrchMerge_Design.md SS3.
     params.push_back (std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID { "hubMarginMs", 1 }, "Hub Margin (ms)", 10, 500, 60));
+
+    // Sender role only: found 2026-09-05 - a real rig's OrchNoteMapper remaps
+    // each instrument's source keyswitch notes (e.g. the ecosystem's own
+    // unified 12-23 zone) to that instrument's OWN destination range before
+    // this Sender taps the track's signal, so a merged reducer downstream
+    // (OrchPiano) that has no keyswitch concept at all treats them as real
+    // musical pitches - confirmed live: a 24-note cluster of near-duplicate
+    // pitches 24-30 landed on a piano reduction channel at take-start, one
+    // per instrument's initial articulation-select firing together. Off by
+    // default (existing rigs without this problem see no behavior change);
+    // zone is per-instance because OrchNoteMapper's destination range
+    // genuinely differs per instrument (seen: flute 24-33; this ecosystem's
+    // own OrchCapture notes elsewhere that bass instruments land in 72-83).
+    params.push_back (std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID { "excludeKsNotes", 1 }, "Exclude Keyswitch Notes", false));
+    params.push_back (std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID { "ksZoneMin", 1 }, "KS Zone Min", 0, 127, 24));
+    params.push_back (std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID { "ksZoneMax", 1 }, "KS Zone Max", 0, 127, 35));
 
     return { params.begin(), params.end() };
 }
@@ -136,10 +160,15 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         if (! message.isNoteOnOrOff())
             continue;
 
+        const int note = juce::jlimit (0, 127, message.getNoteNumber());
+        if (isNoteInKsExclusionZone (note))
+            continue; // never observed by the Hub - the real instrument downstream
+                       // of this Sender still receives it untouched either way.
+
         OrchMergeLink::NoteEvent ev;
         ev.isNoteOn = message.isNoteOn() && message.getVelocity() > 0;
         ev.channel = juce::jlimit (1, 16, message.getChannel());
-        ev.note = juce::jlimit (0, 127, message.getNoteNumber());
+        ev.note = note;
         ev.velocity = juce::jlimit (0, 127, static_cast<int> (message.getVelocity()));
         ev.ppq = blockStartPpq + metadata.samplePosition * ppqPerSample;
 
@@ -150,6 +179,18 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 bool OrchMergeAudioProcessor::isHubRoleParamOn() const
 {
     return roleParam != nullptr && roleParam->load() > 0.5f;
+}
+
+bool OrchMergeAudioProcessor::isNoteInKsExclusionZone (int note) const noexcept
+{
+    if (excludeKsNotesParam == nullptr || excludeKsNotesParam->load() < 0.5f)
+        return false;
+
+    int lo = ksZoneMinParam != nullptr ? juce::roundToInt (ksZoneMinParam->load()) : 24;
+    int hi = ksZoneMaxParam != nullptr ? juce::roundToInt (ksZoneMaxParam->load()) : 35;
+    if (lo > hi)
+        std::swap (lo, hi);
+    return note >= lo && note <= hi;
 }
 
 int OrchMergeAudioProcessor::getHubMarginMs() const

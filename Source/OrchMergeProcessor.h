@@ -15,6 +15,15 @@ class OrchMergeLink;
 // every connected Sender, each placed at the sample position its own ppq
 // maps to once hubMarginMs of relay jitter has been absorbed (see
 // OrchMergeLink and Docs/OrchMerge_Design.md SS3).
+//
+// Sender role also carries an optional per-instance keyswitch exclusion
+// (excludeKsNotes/ksZoneMin/ksZoneMax, 2026-09-05): a Sender commonly sits
+// right after that track's own OrchNoteMapper, which has already remapped
+// the ecosystem's shared keyswitch source zone into THIS instrument's own
+// destination range - a merged reducer downstream (e.g. OrchPiano) that has
+// no keyswitch concept at all otherwise treats those notes as real musical
+// pitches. Off by default; the zone is per-instance because that destination
+// range genuinely differs per instrument.
 class OrchMergeAudioProcessor final : public juce::AudioProcessor
 {
 public:
@@ -70,9 +79,19 @@ public:
     int getHubStopEdgesUi() const { return hubStopEdgesUi.load(); }
 
 private:
+    // Sender role only: is `note` inside this instance's own keyswitch
+    // exclusion zone (see createParameterLayout for why this lives per
+    // Sender, not on the Hub or a shared default - found 2026-09-05: a real
+    // rig's OrchNoteMapper remaps each instrument's keyswitch source notes
+    // to its OWN destination range before the Sender taps the signal, so
+    // the zone genuinely differs per instrument track).
+    bool isNoteInKsExclusionZone (int note) const noexcept;
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* roleParam = nullptr;
     std::atomic<float>* hubMarginMsParam = nullptr;
+    std::atomic<float>* excludeKsNotesParam = nullptr;
+    std::atomic<float>* ksZoneMinParam = nullptr;
+    std::atomic<float>* ksZoneMaxParam = nullptr;
 
     double sampleRate = 44100.0;
     bool wasPlaying = false; // Hub role: detects the playing->stopped edge

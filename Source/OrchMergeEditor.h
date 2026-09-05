@@ -25,12 +25,18 @@ private:
     juce::ComboBox roleBox;
     juce::Label marginLabel;
     juce::Slider marginSlider;
+    juce::ToggleButton excludeKsButton;
+    juce::Label ksMinLabel, ksMaxLabel;
+    juce::Slider ksMinSlider, ksMaxSlider;
     juce::Label statusLabel;
 
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
     std::unique_ptr<ComboBoxAttachment> roleAttachment;
     std::unique_ptr<SliderAttachment> marginAttachment;
+    std::unique_ptr<ButtonAttachment> excludeKsAttachment;
+    std::unique_ptr<SliderAttachment> ksMinAttachment, ksMaxAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OrchMergeAudioProcessorEditor)
 };

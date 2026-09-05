@@ -12,7 +12,7 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     // EVERY build (see GenerateBuildTimestamp.cmake) - unlike __DATE__/
     // __TIME__ baked into this one .cpp, it stays accurate even when an
     // incremental build only recompiled a different file for its own fix.
-    subtitleLabel.setText ("Diagnostics: stop-edge/hub-block counters added  |  compiled " ORCHMERGE_BUILD_TIMESTAMP,
+    subtitleLabel.setText ("Sender: per-instance keyswitch-zone exclusion added  |  compiled " ORCHMERGE_BUILD_TIMESTAMP,
                             juce::dontSendNotification);
     subtitleLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
     subtitleLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
@@ -35,13 +35,38 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     marginAttachment = std::make_unique<SliderAttachment> (
         audioProcessor.getParameters(), "hubMarginMs", marginSlider);
 
+    // Sender-role-only KS exclusion (2026-09-05, see OrchMergeProcessor's
+    // createParameterLayout for the full story) - shown regardless of role
+    // since the same instance toggles between them and the params should
+    // stay visible/settable either way.
+    excludeKsButton.setButtonText ("Exclude Keyswitch Notes");
+    addAndMakeVisible (excludeKsButton);
+    excludeKsAttachment = std::make_unique<ButtonAttachment> (
+        audioProcessor.getParameters(), "excludeKsNotes", excludeKsButton);
+
+    ksMinLabel.setText ("KS Zone Min", juce::dontSendNotification);
+    addAndMakeVisible (ksMinLabel);
+    ksMinSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    ksMinSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 40, 20);
+    addAndMakeVisible (ksMinSlider);
+    ksMinAttachment = std::make_unique<SliderAttachment> (
+        audioProcessor.getParameters(), "ksZoneMin", ksMinSlider);
+
+    ksMaxLabel.setText ("KS Zone Max", juce::dontSendNotification);
+    addAndMakeVisible (ksMaxLabel);
+    ksMaxSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    ksMaxSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 40, 20);
+    addAndMakeVisible (ksMaxSlider);
+    ksMaxAttachment = std::make_unique<SliderAttachment> (
+        audioProcessor.getParameters(), "ksZoneMax", ksMaxSlider);
+
     statusLabel.setJustificationType (juce::Justification::topLeft);
     addAndMakeVisible (statusLabel);
 
     updateStatus();
     startTimerHz (4);
 
-    setSize (440, 270);
+    setSize (440, 340);
 }
 
 OrchMergeAudioProcessorEditor::~OrchMergeAudioProcessorEditor()
@@ -124,6 +149,19 @@ void OrchMergeAudioProcessorEditor::resized()
     auto marginRow = area.removeFromTop (26);
     marginLabel.setBounds (marginRow.removeFromLeft (110));
     marginSlider.setBounds (marginRow);
+
+    area.removeFromTop (12);
+    excludeKsButton.setBounds (area.removeFromTop (24));
+
+    area.removeFromTop (6);
+    auto ksMinRow = area.removeFromTop (26);
+    ksMinLabel.setBounds (ksMinRow.removeFromLeft (110));
+    ksMinSlider.setBounds (ksMinRow);
+
+    area.removeFromTop (6);
+    auto ksMaxRow = area.removeFromTop (26);
+    ksMaxLabel.setBounds (ksMaxRow.removeFromLeft (110));
+    ksMaxSlider.setBounds (ksMaxRow);
 
     area.removeFromTop (12);
     statusLabel.setBounds (area);
