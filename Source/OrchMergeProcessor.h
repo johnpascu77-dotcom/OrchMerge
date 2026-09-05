@@ -60,6 +60,15 @@ public:
 
     OrchMergeLink& getLink() { return *link; }
 
+    // Diagnostics for the transport-stop stuck-note investigation
+    // (2026-09-05): does the Hub's processBlock even keep running once the
+    // host stops (some hosts suspend calls to a zero-tail-length effect once
+    // there's no more input), and does pos->getIsPlaying() actually flip to
+    // false when it does. Read from the message thread by the editor.
+    int getHubBlockCountUi() const { return hubBlockCountUi.load(); }
+    int getHubBlocksNotPlayingUi() const { return hubBlocksNotPlayingUi.load(); }
+    int getHubStopEdgesUi() const { return hubStopEdgesUi.load(); }
+
 private:
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* roleParam = nullptr;
@@ -67,6 +76,9 @@ private:
 
     double sampleRate = 44100.0;
     bool wasPlaying = false; // Hub role: detects the playing->stopped edge
+    std::atomic<int> hubBlockCountUi { 0 };
+    std::atomic<int> hubBlocksNotPlayingUi { 0 };
+    std::atomic<int> hubStopEdgesUi { 0 };
 
     std::unique_ptr<OrchMergeLink> link;
 

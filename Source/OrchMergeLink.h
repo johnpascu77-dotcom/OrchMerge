@@ -63,6 +63,16 @@ public:
     int getConnectedSenderCountForUi() const { return connectedSenderCount.load(); }
     juce::int64 getLastRelayedNoteMsForUi() const { return lastRelayedNoteMs.load(); }
 
+    // Diagnostics for the transport-stop stuck-note investigation (2026-09-05):
+    // how many distinct (channel,note) keys the Hub currently believes are
+    // held, and how many times releaseAllHeld() has actually run. If the
+    // stuck-note symptom recurs, checking these against the editor's
+    // Hub-block/playing-state counters (OrchMergeAudioProcessor) tells us
+    // whether the edge is being detected at all vs. detected but not
+    // actually clearing the right state.
+    int getHeldKeyCountUi() const { return heldKeyCountUi.load(); }
+    int getReleaseAllHeldCallCountUi() const { return releaseAllHeldCallCountUi.load(); }
+
     // ---- Sender role: the audio thread pushes what it observes here ----
     // Called from OrchMergeAudioProcessor::processBlock only when this
     // instance's role is Sender. Never blocks the caller for long - a
@@ -145,6 +155,8 @@ private:
     std::atomic<int> connectedSenderCount { 0 };
     std::atomic<juce::int64> lastRelayedNoteMs { 0 };
     std::atomic<double> currentBpm { 120.0 };
+    std::atomic<int> heldKeyCountUi { 0 };
+    std::atomic<int> releaseAllHeldCallCountUi { 0 };
 
     // owned + touched only by the worker thread (run())
     std::unique_ptr<SenderConnection> sender;

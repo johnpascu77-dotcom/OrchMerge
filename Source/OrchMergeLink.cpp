@@ -359,6 +359,7 @@ void OrchMergeLink::onHubMessage (HubConnection* connection, const juce::MemoryB
         }
     }
 
+    heldKeyCountUi.store (static_cast<int> (holdCounts.size()));
     lastRelayedNoteMs.store (juce::Time::currentTimeMillis());
 }
 
@@ -428,6 +429,8 @@ void OrchMergeLink::releaseAllHeld()
 {
     std::lock_guard<std::mutex> lock (hubMutex);
 
+    releaseAllHeldCallCountUi.fetch_add (1);
+
     for (const auto& [key, count] : holdCounts)
     {
         if (count > 0)
@@ -436,6 +439,7 @@ void OrchMergeLink::releaseAllHeld()
     }
     holdCounts.clear();
     bySender.clear();
+    heldKeyCountUi.store (0);
 }
 
 // ---- Hub side (audio thread) ----

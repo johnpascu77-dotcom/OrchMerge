@@ -64,6 +64,8 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         // block, at the sample position its own ppq maps to.
         midiMessages.clear();
 
+        hubBlockCountUi.fetch_add (1);
+
         double blockStartPpq = 0.0;
         double ppqPerSample = 0.0;
 
@@ -84,8 +86,13 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
                 }
 
                 const bool playing = pos->getIsPlaying();
+                if (! playing)
+                    hubBlocksNotPlayingUi.fetch_add (1);
                 if (wasPlaying && ! playing)
+                {
+                    hubStopEdgesUi.fetch_add (1);
                     link->releaseAllHeld();
+                }
                 wasPlaying = playing;
             }
         }

@@ -12,7 +12,7 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     // EVERY build (see GenerateBuildTimestamp.cmake) - unlike __DATE__/
     // __TIME__ baked into this one .cpp, it stays accurate even when an
     // incremental build only recompiled a different file for its own fix.
-    subtitleLabel.setText ("Fix: release held notes on transport stop  |  compiled " ORCHMERGE_BUILD_TIMESTAMP,
+    subtitleLabel.setText ("Diagnostics: stop-edge/hub-block counters added  |  compiled " ORCHMERGE_BUILD_TIMESTAMP,
                             juce::dontSendNotification);
     subtitleLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
     subtitleLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
@@ -41,7 +41,7 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     updateStatus();
     startTimerHz (4);
 
-    setSize (440, 230);
+    setSize (440, 270);
 }
 
 OrchMergeAudioProcessorEditor::~OrchMergeAudioProcessorEditor()
@@ -81,6 +81,15 @@ void OrchMergeAudioProcessorEditor::updateStatus()
             {
                 text << "\nNo notes relayed yet.";
             }
+
+            // Transport-stop stuck-note diagnostics (2026-09-05) - remove
+            // once the live symptom is confirmed fixed or actually
+            // root-caused differently.
+            text << "\nHeld keys: " << link.getHeldKeyCountUi()
+                 << "  |  stop-edges seen: " << audioProcessor.getHubStopEdgesUi()
+                 << "  |  releases run: " << link.getReleaseAllHeldCallCountUi()
+                 << "\nHub blocks: " << audioProcessor.getHubBlockCountUi()
+                 << "  (not playing: " << audioProcessor.getHubBlocksNotPlayingUi() << ")";
             break;
         }
 
