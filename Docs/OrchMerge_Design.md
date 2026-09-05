@@ -152,6 +152,34 @@ sample mapping in Phase 3 is the clearest candidate, mirroring OrchPiano's own `
 tests) - most of Phases 1-2 are IPC plumbing with no meaningful pure-function surface, closer to
 OrchCaptureLink than to OrchPianoReductionLogic in that respect.
 
+## 5b. Transport-stop fix, `cb5ff74` (2026-09-05) - held notes never released
+
+Found live, in Bitwig: a Hub instance showed a stuck-note activity indicator (a yellow
+dot) with zero input while playback was stopped. Traced by reading the code, not
+guessing - grepped this whole file for `wasPlaying`/`isPlaying`/`allNotesOff`/`panic`/
+`releaseAll` and got zero matches before this fix. Two gaps combined:
+
+- **Sender**: `processBlock` returns immediately whenever the host isn't playing, so a
+  note still held at the exact instant the user hits Stop never gets its eventual
+  note-off observed/forwarded to the Hub.
+- **Hub**: never checked play-state at all - `drainEmitEvents` ran unconditionally every
+  block, with no transport-stop handler anywhere.
+
+Together: a note held at Stop sits in `holdCounts` forever - the visible stuck note. The
+**invisible, worse half**: on the next take, a fresh note-on for that same pitch finds
+`holdCounts` already non-zero, so `isFirstHolder` is false and the Hub silently treats the
+new attack as "already sounding" instead of relaying it downstream - a real mechanism for
+a missing-note symptom, not just a cosmetic stuck-light issue.
+
+**Fix**: `OrchMergeLink::releaseAllHeld()` force-releases everything currently held, same
+technique `releaseAllForSender` already used for one dropped connection, just for every
+sender's holdings at once - clears `holdCounts`/`bySender` and emits an immediate
+(`kImmediatePpq`) note-off for anything that was still counted. `OrchMergeProcessor` (Hub
+role) now tracks `wasPlaying` and calls it on the exact playing→stopped edge. Builds
+clean, reinstalled. **Not yet Bitwig-tested live** - next step is reproducing the original
+stuck-note scenario and confirming both that the indicator clears AND that a subsequent
+take's note-ons for the previously-stuck pitch aren't swallowed.
+
 ## 6. Open questions for the next session
 
 - Exact wire format for Sender→Hub push: reuse OrchCaptureLink's `juce::var`/JSON-ish pattern, or
