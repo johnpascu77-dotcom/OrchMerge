@@ -10,7 +10,7 @@ juce_add_plugin(OrchMerge
     PLUGIN_MANUFACTURER_CODE Jpas
     PLUGIN_CODE Omrg
 
-    FORMATS VST3
+    FORMATS VST3 Standalone
 
     PRODUCT_NAME "OrchMerge"
     PLUGIN_NAME "OrchMerge"
