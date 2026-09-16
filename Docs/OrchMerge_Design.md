@@ -269,6 +269,10 @@ session). 0-127 now covers 0-1.98 beats at ~0.0156-beat resolution - comfortably
 Margin's whole realistic range. This does mean OrchCapture needed a real change after all (its own
 Docs, §9, has the receiving-side half of this story) - the original claim of "zero changes needed
 downstream" only held for the broken whole-beats version. Rebuilt + reinstalled both plugins.
-**Not yet live-tested** - next step is re-capturing the same kick-start motif with the corrected
-CC 114/fine-resolution version and confirming the exported `.mid` now lands notes at the clean bar/beat
-positions instead of ~60ms late.
+
+**RESOLVED** - user re-captured and confirmed the first note now lands essentially exactly on the beat
+(measured directly from the new `.mid`: 1 tick off out of 960, ~0.8ms). The same re-test also surfaced a
+separate, unrelated real artifact (short "particle" notes from merging 3 independently-clocked
+cross-instance-broadcast echo sources) - not a Hub Margin/delay-compensation issue at all; see
+OrchCapture's own Docs §10 for that fix (the Hub's own unison-merge logic, §4 above, is working exactly
+as designed here, not buggy).
