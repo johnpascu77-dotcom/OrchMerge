@@ -92,12 +92,21 @@ private:
     std::atomic<float>* excludeKsNotesParam = nullptr;
     std::atomic<float>* ksZoneMinParam = nullptr;
     std::atomic<float>* ksZoneMaxParam = nullptr;
+    std::atomic<float>* delayCompensationCcParam = nullptr;
 
     double sampleRate = 44100.0;
     bool wasPlaying = false; // Hub role: detects the playing->stopped edge
     std::atomic<int> hubBlockCountUi { 0 };
     std::atomic<int> hubBlocksNotPlayingUi { 0 };
     std::atomic<int> hubStopEdgesUi { 0 };
+
+    // Hub role only: reports hubMarginMs downstream (see Docs §5d) so
+    // OrchCapture's own lookaheadCompensationCc (or anything else that cares)
+    // can shift its capture back by the same amount, exactly the mechanism
+    // OrchPiano's own delayCompensationCc already established - see this
+    // member's own use in processBlock for the full story.
+    int lastSentDelayCcValue = -1;
+    double lastDelayCcSentPpq = -1.0e18;
 
     std::unique_ptr<OrchMergeLink> link;
 

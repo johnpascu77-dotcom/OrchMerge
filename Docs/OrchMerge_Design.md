@@ -220,3 +220,37 @@ receives the note untouched either way, since Sender stays a transparent pass-th
 design. Builds clean, reinstalled. **Not yet Bitwig-tested live** - next step is enabling
 this on the affected instrument tracks with each one's own actual destination range and
 confirming the cluster is gone from a fresh capture.
+
+## 5d. Delay Compensation CC - reporting Hub Margin downstream (2026-09-16)
+
+Root-caused from a real OrchDelay session (a different repo, same rig): the user fed a clean
+kick-start motif through a chain ending in an OrchMerge Hub, then captured the merged output with
+OrchCapture for Dorico - and every note in the capture landed noticeably late, "giving Dorico a hard
+time" in translation. Quantified directly from the actual captured `.mid` file (parsed by hand, not
+guessed): the first note landed at tick 3916 of a 960-tick-per-quarter file at ~77bpm, 76 ticks past
+the clean 4-beat/one-bar mark of 3840 - **61.7ms**, matching this plugin's own `hubMarginMs` default
+(60ms) almost exactly.
+
+This isn't a bug in Hub Margin itself - §3 explains why the Hub deliberately holds every event back
+by this amount (absorbing Sender-to-Hub relay jitter so genuinely-simultaneous cross-instrument
+unisons still land close enough together for a downstream reducer to group them as one onset). The
+actual gap was that nothing downstream ever got told this delay was happening, so it just silently
+shifted every captured note late with no way to correct for it.
+
+**Fix**: reused a mechanism that already exists in this exact ecosystem rather than inventing a new
+one - OrchPiano already reports its own constant lookahead delay (in beats) on a configurable CC
+(`delayCompensationCc`, default CC 113), and OrchCapture already knows how to consume it
+(`lookaheadCompensationCc`, same default 113): observes the CC, subtracts the reported beat-delay from
+every captured note's onset/release, and stays otherwise fully transparent (the CC itself still passes
+through untouched). OrchMerge's Hub now does the exact same thing: converts `hubMarginMs` to beats
+using the CURRENT tempo (`hubMarginMs / 1000 * bpm / 60`, re-derived every send since a fixed
+millisecond margin is a different number of beats at different tempos), and broadcasts it on the same
+CC 113 by default - sent at transport start, on any value change, and re-sent every 16 beats as a
+safety net for a late-loading listener, byte-for-byte the same cadence OrchPiano's own sender already
+uses. Zero changes needed on OrchCapture's own side - it already treats any plugin's report on that CC
+identically, regardless of which plugin sent it.
+
+New param `delayCompensationCc` (0-127, default 113, 0=off), Hub role only. Builds clean, reinstalled.
+**Not yet live-tested** - next step is re-capturing the same kick-start motif with this enabled on the
+Hub and confirming the exported `.mid` now lands notes at the clean bar/beat positions instead of
+~60ms late.

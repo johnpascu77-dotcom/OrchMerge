@@ -25,6 +25,8 @@ private:
     juce::ComboBox roleBox;
     juce::Label marginLabel;
     juce::Slider marginSlider;
+    juce::Label delayCompensationCcLabel;
+    juce::Slider delayCompensationCcSlider;
     juce::ToggleButton excludeKsButton;
     juce::Label ksMinLabel, ksMaxLabel;
     juce::Slider ksMinSlider, ksMaxSlider;
@@ -35,6 +37,7 @@ private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
     std::unique_ptr<ComboBoxAttachment> roleAttachment;
     std::unique_ptr<SliderAttachment> marginAttachment;
+    std::unique_ptr<SliderAttachment> delayCompensationCcAttachment;
     std::unique_ptr<ButtonAttachment> excludeKsAttachment;
     std::unique_ptr<SliderAttachment> ksMinAttachment, ksMaxAttachment;
 

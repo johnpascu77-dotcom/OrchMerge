@@ -13,6 +13,7 @@ OrchMergeAudioProcessor::OrchMergeAudioProcessor()
     excludeKsNotesParam = parameters.getRawParameterValue ("excludeKsNotes");
     ksZoneMinParam = parameters.getRawParameterValue ("ksZoneMin");
     ksZoneMaxParam = parameters.getRawParameterValue ("ksZoneMax");
+    delayCompensationCcParam = parameters.getRawParameterValue ("delayCompensationCc");
 
     link = std::make_unique<OrchMergeLink> (*this);
 }
@@ -61,6 +62,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout OrchMergeAudioProcessor::cre
     params.push_back (std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID { "ksZoneMax", 1 }, "KS Zone Max", 0, 127, 35));
 
+    // Hub role only: reports Hub Margin downstream, in beats (converted from
+    // hubMarginMs using the current tempo), so OrchCapture (or anything else
+    // that cares) can shift its own capture back by the same amount instead
+    // of landing hubMarginMs late - see Docs/OrchMerge_Design.md §5d. Same
+    // mechanism and same default CC as OrchPiano's own delayCompensationCc -
+    // OrchCapture's own lookaheadCompensationCc param already consumes it,
+    // no downstream change needed. 0 = off.
+    params.push_back (std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID { "delayCompensationCc", 1 }, "Delay Compensation CC# (0=off)", 0, 127, 113));
+
     return { params.begin(), params.end() };
 }
 
@@ -92,6 +103,8 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 
         double blockStartPpq = 0.0;
         double ppqPerSample = 0.0;
+        double bpm = 120.0;
+        bool playing = false;
 
         if (auto* transport = getPlayHead())
         {
@@ -101,7 +114,6 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
                 {
                     blockStartPpq = *ppqOpt;
 
-                    double bpm = 120.0;
                     if (const auto hostBpm = pos->getBpm(); hostBpm && *hostBpm > 0.0)
                         bpm = *hostBpm;
 
@@ -109,7 +121,7 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
                     link->setCurrentBpm (bpm);
                 }
 
-                const bool playing = pos->getIsPlaying();
+                playing = pos->getIsPlaying();
                 if (! playing)
                     hubBlocksNotPlayingUi.fetch_add (1);
                 if (wasPlaying && ! playing)
@@ -127,6 +139,39 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
                 ? juce::MidiMessage::noteOn (ev.channel, ev.note, static_cast<juce::uint8> (ev.velocity))
                 : juce::MidiMessage::noteOff (ev.channel, ev.note, static_cast<juce::uint8> (ev.velocity));
             midiMessages.addEvent (message, ev.sampleOffset);
+        }
+
+        // Reports Hub Margin downstream so OrchCapture (or anything else
+        // that cares) can shift its own capture back by the same amount
+        // instead of landing hubMarginMs late - see Docs §5d. Same pattern
+        // as OrchPiano's own delayCompensationCc: sent at transport start,
+        // on any value change, and re-sent every 16 beats as a safety net
+        // for a late-loading listener. A plain CC, observed and passed
+        // through - never consumed - by anything downstream.
+        if (playing)
+        {
+            const int compCc = delayCompensationCcParam != nullptr
+                ? juce::roundToInt (delayCompensationCcParam->load()) : 0;
+            if (compCc > 0)
+            {
+                const int hubMarginMs = getHubMarginMs();
+                const int delayBeats = juce::jlimit (0, 127,
+                    juce::roundToInt (static_cast<double> (hubMarginMs) / 1000.0 * (bpm / 60.0)));
+
+                const bool valueChanged = delayBeats != lastSentDelayCcValue;
+                const bool dueForResend = blockStartPpq - lastDelayCcSentPpq >= 16.0;
+                if (valueChanged || dueForResend)
+                {
+                    midiMessages.addEvent (juce::MidiMessage::controllerEvent (1, compCc, delayBeats), 0);
+                    lastSentDelayCcValue = delayBeats;
+                    lastDelayCcSentPpq = blockStartPpq;
+                }
+            }
+        }
+        else
+        {
+            lastSentDelayCcValue = -1;
+            lastDelayCcSentPpq = -1.0e18;
         }
 
         return;

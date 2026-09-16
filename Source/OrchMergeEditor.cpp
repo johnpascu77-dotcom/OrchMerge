@@ -12,7 +12,7 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     // EVERY build (see GenerateBuildTimestamp.cmake) - unlike __DATE__/
     // __TIME__ baked into this one .cpp, it stays accurate even when an
     // incremental build only recompiled a different file for its own fix.
-    subtitleLabel.setText ("Sender: per-instance keyswitch-zone exclusion added  |  compiled " ORCHMERGE_BUILD_TIMESTAMP,
+    subtitleLabel.setText ("Hub: reports Hub Margin via Delay Compensation CC  |  compiled " ORCHMERGE_BUILD_TIMESTAMP,
                             juce::dontSendNotification);
     subtitleLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
     subtitleLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
@@ -34,6 +34,20 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     addAndMakeVisible (marginSlider);
     marginAttachment = std::make_unique<SliderAttachment> (
         audioProcessor.getParameters(), "hubMarginMs", marginSlider);
+
+    // Reports Hub Margin downstream (converted to beats) so OrchCapture's
+    // own lookaheadCompensationCc (or anything else that cares) can shift
+    // its capture back by the same amount - see Docs §5d. Default CC 113
+    // matches OrchCapture's own default and OrchPiano's own
+    // delayCompensationCc, so the common case needs no matching at all.
+    delayCompensationCcLabel.setText ("Delay Comp. CC# (0=off)", juce::dontSendNotification);
+    addAndMakeVisible (delayCompensationCcLabel);
+
+    delayCompensationCcSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    delayCompensationCcSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 50, 20);
+    addAndMakeVisible (delayCompensationCcSlider);
+    delayCompensationCcAttachment = std::make_unique<SliderAttachment> (
+        audioProcessor.getParameters(), "delayCompensationCc", delayCompensationCcSlider);
 
     // Sender-role-only KS exclusion (2026-09-05, see OrchMergeProcessor's
     // createParameterLayout for the full story) - shown regardless of role
@@ -66,7 +80,7 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     updateStatus();
     startTimerHz (4);
 
-    setSize (440, 340);
+    setSize (440, 370);
 }
 
 OrchMergeAudioProcessorEditor::~OrchMergeAudioProcessorEditor()
@@ -149,6 +163,11 @@ void OrchMergeAudioProcessorEditor::resized()
     auto marginRow = area.removeFromTop (26);
     marginLabel.setBounds (marginRow.removeFromLeft (110));
     marginSlider.setBounds (marginRow);
+
+    area.removeFromTop (6);
+    auto delayCompensationCcRow = area.removeFromTop (26);
+    delayCompensationCcLabel.setBounds (delayCompensationCcRow.removeFromLeft (140));
+    delayCompensationCcSlider.setBounds (delayCompensationCcRow);
 
     area.removeFromTop (12);
     excludeKsButton.setBounds (area.removeFromTop (24));
