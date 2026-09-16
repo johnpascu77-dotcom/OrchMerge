@@ -101,10 +101,11 @@ private:
     std::atomic<int> hubStopEdgesUi { 0 };
 
     // Hub role only: reports hubMarginMs downstream (see Docs §5d) so
-    // OrchCapture's own lookaheadCompensationCc (or anything else that cares)
-    // can shift its capture back by the same amount, exactly the mechanism
-    // OrchPiano's own delayCompensationCc already established - see this
-    // member's own use in processBlock for the full story.
+    // OrchCapture's own lookaheadCompensationFineCc (or anything else that
+    // cares) can shift its capture back by the same amount, in FINE/sub-beat
+    // resolution (Hub Margin is sub-beat at any realistic tempo, unlike
+    // OrchPiano's own delayCompensationCc which reports whole beats) - see
+    // this member's own use in processBlock for the full story.
     int lastSentDelayCcValue = -1;
     double lastDelayCcSentPpq = -1.0e18;
 

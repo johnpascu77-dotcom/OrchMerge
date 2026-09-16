@@ -251,6 +251,24 @@ uses. Zero changes needed on OrchCapture's own side - it already treats any plug
 identically, regardless of which plugin sent it.
 
 New param `delayCompensationCc` (0-127, default 113, 0=off), Hub role only. Builds clean, reinstalled.
-**Not yet live-tested** - next step is re-capturing the same kick-start motif with this enabled on the
-Hub and confirming the exported `.mid` now lands notes at the clean bar/beat positions instead of
-~60ms late.
+
+**First attempt produced ZERO effect - real bug, not just "not yet live-tested"**: the user re-captured
+with this enabled and the exported `.mid` landed at the exact same uncompensated tick as before. Root
+cause: the "CC value = whole beats" wire format above suits OrchPiano's own lookahead (a deliberately
+whole-beat planning window) but is fundamentally the wrong resolution for Hub Margin - at any realistic
+tempo, 10-500ms is well under 0.5 beats (60ms at 77bpm is 0.077 beats), and `juce::roundToInt` on a
+value that small always rounds down to **0**. Every "compensation" this Hub sent was, every time, a
+report of zero delay - the bug was never in the subtraction math on OrchCapture's side, it was that a
+whole-beats-only protocol has no resolution fine enough to carry a genuinely small delay at all.
+
+**Real fix**: switched to a dedicated FINE-resolution CC instead of reusing OrchPiano's own whole-beats
+one. Default changed 113→**114**, and the wire encoding changed from `beats` directly to `beats ×
+kFineBeatScale` (64.0 - a constant that MUST match exactly on OrchCapture's own receiving side, see its
+`OrchCaptureProcessor.cpp` for the twin constant and `lookaheadCompensationFineCc` param, added the same
+session). 0-127 now covers 0-1.98 beats at ~0.0156-beat resolution - comfortably fine enough for Hub
+Margin's whole realistic range. This does mean OrchCapture needed a real change after all (its own
+Docs, §9, has the receiving-side half of this story) - the original claim of "zero changes needed
+downstream" only held for the broken whole-beats version. Rebuilt + reinstalled both plugins.
+**Not yet live-tested** - next step is re-capturing the same kick-start motif with the corrected
+CC 114/fine-resolution version and confirming the exported `.mid` now lands notes at the clean bar/beat
+positions instead of ~60ms late.

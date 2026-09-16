@@ -4,6 +4,15 @@
 
 #include <utility>
 
+namespace
+{
+    // Must match OrchCaptureProcessor.cpp's own kFineBeatScale exactly - see
+    // that constant's own doc comment for the full reasoning (0-127 covers
+    // 0-1.98 beats at ~0.0156-beat resolution, comfortably covering Hub
+    // Margin's 10-500ms range up to ~240bpm before clipping).
+    constexpr double kFineBeatScale = 64.0;
+}
+
 OrchMergeAudioProcessor::OrchMergeAudioProcessor()
     : AudioProcessor (BusesProperties()),
       parameters (*this, nullptr, "OrchMergeParameters", createParameterLayout())
@@ -62,15 +71,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout OrchMergeAudioProcessor::cre
     params.push_back (std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID { "ksZoneMax", 1 }, "KS Zone Max", 0, 127, 35));
 
-    // Hub role only: reports Hub Margin downstream, in beats (converted from
-    // hubMarginMs using the current tempo), so OrchCapture (or anything else
-    // that cares) can shift its own capture back by the same amount instead
-    // of landing hubMarginMs late - see Docs/OrchMerge_Design.md §5d. Same
-    // mechanism and same default CC as OrchPiano's own delayCompensationCc -
-    // OrchCapture's own lookaheadCompensationCc param already consumes it,
-    // no downstream change needed. 0 = off.
+    // Hub role only: reports Hub Margin downstream, in FINE (sub-beat)
+    // resolution (converted from hubMarginMs using the current tempo), so
+    // OrchCapture (or anything else that cares) can shift its own capture
+    // back by the same amount instead of landing hubMarginMs late - see
+    // Docs/OrchMerge_Design.md §5d. Deliberately NOT the same CC/encoding as
+    // OrchPiano's own delayCompensationCc (whole beats, CC 113): Hub Margin
+    // (10-500ms) is sub-beat at any realistic tempo, and a whole-beats-only
+    // encoding rounds anything under 0.5 beats down to 0, silently
+    // discarding it entirely (found live 2026-09-16 - the very first attempt
+    // at this feature used CC 113/whole-beats and produced zero effect).
+    // Targets OrchCapture's own lookaheadCompensationFineCc instead, default
+    // 114, matching (see OrchCaptureProcessor's own kFineBeatScale for the
+    // exact wire encoding both sides must agree on). 0 = off.
     params.push_back (std::make_unique<juce::AudioParameterInt>(
-        juce::ParameterID { "delayCompensationCc", 1 }, "Delay Compensation CC# (0=off)", 0, 127, 113));
+        juce::ParameterID { "delayCompensationCc", 1 }, "Delay Compensation CC# (0=off)", 0, 127, 114));
 
     return { params.begin(), params.end() };
 }
@@ -155,15 +170,15 @@ void OrchMergeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
             if (compCc > 0)
             {
                 const int hubMarginMs = getHubMarginMs();
-                const int delayBeats = juce::jlimit (0, 127,
-                    juce::roundToInt (static_cast<double> (hubMarginMs) / 1000.0 * (bpm / 60.0)));
+                const double delayBeats = static_cast<double> (hubMarginMs) / 1000.0 * (bpm / 60.0);
+                const int ccValue = juce::jlimit (0, 127, juce::roundToInt (delayBeats * kFineBeatScale));
 
-                const bool valueChanged = delayBeats != lastSentDelayCcValue;
+                const bool valueChanged = ccValue != lastSentDelayCcValue;
                 const bool dueForResend = blockStartPpq - lastDelayCcSentPpq >= 16.0;
                 if (valueChanged || dueForResend)
                 {
-                    midiMessages.addEvent (juce::MidiMessage::controllerEvent (1, compCc, delayBeats), 0);
-                    lastSentDelayCcValue = delayBeats;
+                    midiMessages.addEvent (juce::MidiMessage::controllerEvent (1, compCc, ccValue), 0);
+                    lastSentDelayCcValue = ccValue;
                     lastDelayCcSentPpq = blockStartPpq;
                 }
             }

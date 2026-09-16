@@ -35,12 +35,14 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
     marginAttachment = std::make_unique<SliderAttachment> (
         audioProcessor.getParameters(), "hubMarginMs", marginSlider);
 
-    // Reports Hub Margin downstream (converted to beats) so OrchCapture's
-    // own lookaheadCompensationCc (or anything else that cares) can shift
-    // its capture back by the same amount - see Docs §5d. Default CC 113
-    // matches OrchCapture's own default and OrchPiano's own
-    // delayCompensationCc, so the common case needs no matching at all.
-    delayCompensationCcLabel.setText ("Delay Comp. CC# (0=off)", juce::dontSendNotification);
+    // Reports Hub Margin downstream (converted to FINE/sub-beat resolution,
+    // see Docs §5d) so OrchCapture's own lookaheadCompensationFineCc (or
+    // anything else that cares) can shift its capture back by the same
+    // amount. Default CC 114 matches OrchCapture's own fine-CC default -
+    // deliberately NOT the same CC/encoding as OrchPiano's own
+    // delayCompensationCc (whole beats, CC 113), since Hub Margin is
+    // sub-beat at any realistic tempo.
+    delayCompensationCcLabel.setText ("Delay Comp. CC# (fine, 0=off)", juce::dontSendNotification);
     addAndMakeVisible (delayCompensationCcLabel);
 
     delayCompensationCcSlider.setSliderStyle (juce::Slider::LinearHorizontal);
