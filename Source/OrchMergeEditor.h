@@ -19,6 +19,8 @@ private:
     void updateStatus();
 
     OrchMergeAudioProcessor& audioProcessor;
+    juce::TooltipWindow tooltipWindow { this, 700 };   // without one, no setTooltip() text would ever show
+
 
     juce::Label titleLabel, subtitleLabel;
     juce::Label roleLabel;

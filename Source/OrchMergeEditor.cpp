@@ -23,6 +23,19 @@ OrchMergeAudioProcessorEditor::OrchMergeAudioProcessorEditor (OrchMergeAudioProc
 
     roleBox.addItemList ({ "Sender", "Hub" }, 1);
     addAndMakeVisible (roleBox);
+    // Tooltips (text from Docs/OrchMerge_Guide.html): hovering a control or its label shows what it does.
+    roleBox.setTooltip ("Defaults to Sender — safe to drop on a track before any Hub exists, since a Sender only ever tries to connect out, never binds anything. Exactly one instance in the whole rig should be Hub.");
+    roleLabel.setTooltip ("Defaults to Sender — safe to drop on a track before any Hub exists, since a Sender only ever tries to connect out, never binds anything. Exactly one instance in the whole rig should be Hub.");
+    marginSlider.setTooltip ("Hub role only: wall-clock slack held before placing an emitted event, absorbing ordinary Sender-to-Hub relay jitter so a genuine cross-instrument unison still lands close enough together for OrchPiano's own onset grouping to see it as one chord, not several.");
+    marginLabel.setTooltip ("Hub role only: wall-clock slack held before placing an emitted event, absorbing ordinary Sender-to-Hub relay jitter so a genuine cross-instrument unison still lands close enough together for OrchPiano's own onset grouping to see it as one chord, not several.");
+    excludeKsButton.setTooltip ("Sender role only. By the time a Sender taps a track, OrchNoteMapper has already remapped that instrument's keyswitches into its own destination zone — without this, a reducer downstream with no keyswitch concept treats them as real musical pitches. Off by default so existing rigs see no change.");
+    ksMinSlider.setTooltip ("Bottom of the excluded zone — genuinely per-instance, since OrchNoteMapper's destination range differs per instrument (a flute lands around 24–33; bass instruments around 72–83).");
+    ksMinLabel.setTooltip ("Bottom of the excluded zone — genuinely per-instance, since OrchNoteMapper's destination range differs per instrument (a flute lands around 24–33; bass instruments around 72–83).");
+    ksMaxSlider.setTooltip ("Top of the excluded zone.");
+    ksMaxLabel.setTooltip ("Top of the excluded zone.");
+    // written by hand (controls the guide has no row for, labels, read-outs)
+    delayCompensationCcSlider.setTooltip ("Hub: report the Hub margin as a delay in beats on this CC (default 113), so OrchCapture can shift the captured notes back by it. Sent at transport start, on any change and every 16 beats. 0 = off.");
+
     roleAttachment = std::make_unique<ComboBoxAttachment> (
         audioProcessor.getParameters(), "role", roleBox);
 
